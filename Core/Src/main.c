@@ -19,7 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_host.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,6 +48,20 @@ I2S_HandleTypeDef hi2s3;
 
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef tim4Handle;
+
+typedef struct T_ButtonStatus_StructType
+{
+    GPIO_PinState current;
+    GPIO_PinState previous;
+} T_ButtonStatus_Struct;
+
+typedef enum
+{
+    USER_LED_CONFIG_DEFAULT = 0,
+    USER_LED_CONFIG_FOUR_SECONDS_PERIOD
+}USER_LED_CONFIG;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -60,7 +74,8 @@ static void MX_I2C1_Init(void);
 static void MX_I2S2_Init(void);
 static void MX_I2S3_Init(void);
 static void MX_SPI1_Init(void);
-void MX_USB_HOST_Process(void);
+static void MX_TIM_Init(USER_LED_CONFIG user_led_config);
+
 
 /* USER CODE BEGIN PFP */
 
@@ -78,7 +93,9 @@ void MX_USB_HOST_Process(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+ static T_ButtonStatus_Struct user_button_state = {0};
+ static uint8_t period_4_seconds = 0;
+ 
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -106,9 +123,13 @@ int main(void)
   MX_I2S2_Init();
   MX_I2S3_Init();
   MX_SPI1_Init();
-  MX_USB_HOST_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
+  MX_TIM_Init(USER_LED_CONFIG_DEFAULT); /* Timer Init - Default: 0.25 s period */
+  
+  HAL_TIM_OC_Start(&tim4Handle, TIM_CHANNEL_1);
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -116,9 +137,46 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+      
+    /* Read User Button */
+    user_button_state.current = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
+    
+    HAL_Delay(5);
+    
+    /* If Button was pressed and then released, change LED Period */
+    if ((GPIO_PIN_SET == user_button_state.previous) && (GPIO_PIN_RESET == user_button_state.current))
+    {
+        /* Toggle 4 seconds period flag */
+        period_4_seconds = !period_4_seconds;
+        
+        /* Stop Timer */
+        HAL_TIM_OC_Stop(&tim4Handle, TIM_CHANNEL_1);
+        
+        if (period_4_seconds)
+        {
+            /* Update Timer Config to 4 seconds period */
+            MX_TIM_Init(USER_LED_CONFIG_FOUR_SECONDS_PERIOD);
+        }
+        else
+        {
+            /* Change to Default value of 0.25 seconds period */
+            MX_TIM_Init(USER_LED_CONFIG_DEFAULT);
+        }
+        
+        HAL_Delay(1);
+        
+        /* Restart Timer with new Frequency */
+        HAL_TIM_OC_Start(&tim4Handle, TIM_CHANNEL_1);
+    }
+    
+    /* Update button previous state if different from current */
+    if (user_button_state.previous != user_button_state.current)
+    {
+        user_button_state.previous = user_button_state.current;
+    }
+    
   }
   /* USER CODE END 3 */
 }
@@ -140,7 +198,7 @@ void SystemClock_Config(void)
   * in the RCC_OscInitTypeDef structure.
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
@@ -334,6 +392,7 @@ static void MX_SPI1_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitTypeDef GPIO_GreenLEDInitStruct = {0};
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -342,7 +401,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-
+  
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CS_I2C_SPI_GPIO_Port, CS_I2C_SPI_Pin, GPIO_PIN_RESET);
 
@@ -350,9 +409,17 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(OTG_FS_PowerSwitchOn_GPIO_Port, OTG_FS_PowerSwitchOn_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, LD3_Pin|LD5_Pin|LD6_Pin
+                           |Audio_RST_Pin, GPIO_PIN_RESET);
 
+  /* Init Green LED GPIO PD12 to Timer 4 Channel 1 */
+  GPIO_GreenLEDInitStruct.Pin = LD4_Pin;                    /* PD12 */
+  GPIO_GreenLEDInitStruct.Pull = GPIO_NOPULL;                /* No Pull */
+  GPIO_GreenLEDInitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;      /* Medium Frequency */
+  GPIO_GreenLEDInitStruct.Mode = GPIO_MODE_AF_PP;           /* Alternate Function */
+  GPIO_GreenLEDInitStruct.Alternate = GPIO_AF2_TIM4;        /* Timer 4 Channel 1 - From UM1472 */
+  HAL_GPIO_Init(GPIOD, &GPIO_GreenLEDInitStruct);  
+  
   /*Configure GPIO pin : DATA_Ready_Pin */
   GPIO_InitStruct.Pin = DATA_Ready_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -387,8 +454,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : LD4_Pin LD3_Pin LD5_Pin LD6_Pin
                            Audio_RST_Pin */
-  GPIO_InitStruct.Pin = LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
-                          |Audio_RST_Pin;
+  GPIO_InitStruct.Pin = LD3_Pin|LD5_Pin|LD6_Pin
+                            |Audio_RST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -403,6 +470,82 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
+{
+    TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+    TIM_MasterConfigTypeDef sMasterConfig = {0};
+    TIM_OC_InitTypeDef sConfigOC = {0};
+    
+    /* Enable TIM4 Clock */
+    __HAL_RCC_TIM4_CLK_ENABLE();
+    
+    /* Timer 4 Basic Timer Initialization 
+     * Input Frequency = 96 MHz. Prescaler = 48000 - 1. TIM Input Freq = 96MHz/48K = 2000. Input Period = 0.5ms
+     */
+    tim4Handle.Instance = TIM4;
+    tim4Handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    tim4Handle.Init.CounterMode = TIM_COUNTERMODE_UP;
+    tim4Handle.Init.Prescaler = 48000 - 1;    
+    if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
+    {
+        /* 4 seconds period */
+        /* ARR + 1 = (Desired Period) / (TIM Input Period) = 4000ms/0.5ms = 4000 */
+        tim4Handle.Init.Period = 8000 - 1;        
+    }
+    else
+    {
+        /* Default */
+        /* ARR + 1 = (Desired Period)/(TIM Input Period) = 250ms/0.5ms = 500 */
+        tim4Handle.Init.Period = 500 - 1;
+    }    
+    if (HAL_TIM_Base_Init(&tim4Handle) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    
+    /* Clock Source Configuration */
+    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+    if (HAL_TIM_ConfigClockSource(&tim4Handle, &sClockSourceConfig) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    
+    /* OC Initialization */
+    if (HAL_TIM_OC_Init(&tim4Handle) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    
+    /* Master Configuration */
+    sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+    sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    if (HAL_TIMEx_MasterConfigSynchronization(&tim4Handle, &sMasterConfig) != HAL_OK)
+    {
+        Error_Handler();
+    }
+    
+    /* OC Channel Configuration */
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+    sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    
+    if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
+    {
+        /* 4 sec period Config: 8000/4 = 2000 to achieve 25% Duty Cycle */
+        sConfigOC.Pulse = 2000;
+    }
+    else
+    {
+        /* Default Config: 500/4 to achieve 25% Duty Cycle */
+        sConfigOC.Pulse = 125;
+    }
+    
+
+    if (HAL_TIM_OC_ConfigChannel(&tim4Handle, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+    {
+        Error_Handler();
+    }    
+}
 
 /* USER CODE END 4 */
 
