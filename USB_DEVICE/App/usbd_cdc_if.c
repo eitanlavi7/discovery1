@@ -23,7 +23,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-
+#include <string.h>
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -261,11 +261,22 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   */
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
-  /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-  return (USBD_OK);
-  /* USER CODE END 6 */
+    /* USER CODE BEGIN 6 */
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
+    USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+    if (RECEIVED_DATA_STATUS_NOT_RECEIVED == received_data.status)
+    {
+        /* Clean Buffer */
+        memset((char *)received_data.data, '\0', sizeof(received_data.data));
+        
+        /* Copy into buffer */
+        strcpy((char *)received_data.data, (const char *)Buf);
+        
+        /* Update Status */
+        received_data.status = RECEIVED_DATA_STATUS_RECEIVED;
+    }
+    return (USBD_OK);
+    /* USER CODE END 6 */
 }
 
 /**

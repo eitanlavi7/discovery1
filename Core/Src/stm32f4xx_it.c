@@ -57,6 +57,8 @@
 
 /* External variables --------------------------------------------------------*/
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
+extern TIM_HandleTypeDef tim4Handle;
+
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -214,6 +216,22 @@ void OTG_FS_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+void TIM4_IRQHandler(void)
+{
+    static uint8_t toggle_flag = 1;
+    HAL_TIM_IRQHandler(&tim4Handle);
+    
+    if (toggle_flag)
+    {
+        TIM4->CCR1 = 3999; /* Toggle back again at end of period to restart Output. */
+    }    
+    else
+    {
+        TIM4->CCR1 = 3000; /* Toggle back again at end of period to restart Output. */
+    }
+    toggle_flag = !toggle_flag;
+}
 
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

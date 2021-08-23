@@ -23,6 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usbd_cdc_if.h"
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -50,20 +52,59 @@ SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef tim4Handle;
 
-typedef struct T_ButtonStatus_StructType
-{
-    GPIO_PinState current;
-    GPIO_PinState previous;
-} T_ButtonStatus_Struct;
-
 typedef enum
 {
     USER_LED_CONFIG_DEFAULT = 0,
     USER_LED_CONFIG_FOUR_SECONDS_PERIOD
 }USER_LED_CONFIG;
 
-/* USER CODE BEGIN PV */
+typedef struct T_ButtonStatus_StructType
+{
+    GPIO_PinState current;
+    GPIO_PinState previous;
+} T_ButtonStatus_Struct;
 
+/* USER CODE BEGIN PV */
+static uint8_t changed_case_data[50];
+static uint8_t src8;
+T_RxData_Struct received_data = {0}; /* Global received buffer */
+ 
+ const uint8_t crc_max_look_up_table[256] =
+ {
+     0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x83,
+     0xc2, 0x9c, 0x7e, 0x20, 0xa3, 0xfd, 0x1f, 0x41,
+     0x9d, 0xc3, 0x21, 0x7f, 0xfc, 0xa2, 0x40, 0x1e,
+     0x5f, 0x01, 0xe3, 0xbd, 0x3e, 0x60, 0x82, 0xdc,
+     0x23, 0x7d, 0x9f, 0xc1, 0x42, 0x1c, 0xfe, 0xa0,
+     0xe1, 0xbf, 0x5d, 0x03, 0x80, 0xde, 0x3c, 0x62,
+     0xbe, 0xe0, 0x02, 0x5c, 0xdf, 0x81, 0x63, 0x3d,
+     0x7c, 0x22, 0xc0, 0x9e, 0x1d, 0x43, 0xa1, 0xff,
+     0x46, 0x18, 0xfa, 0xa4, 0x27, 0x79, 0x9b, 0xc5,
+     0x84, 0xda, 0x38, 0x66, 0xe5, 0xbb, 0x59, 0x07,
+     0xdb, 0x85, 0x67, 0x39, 0xba, 0xe4, 0x06, 0x58,
+     0x19, 0x47, 0xa5, 0xfb, 0x78, 0x26, 0xc4, 0x9a,
+     0x65, 0x3b, 0xd9, 0x87, 0x04, 0x5a, 0xb8, 0xe6,
+     0xa7, 0xf9, 0x1b, 0x45, 0xc6, 0x98, 0x7a, 0x24,
+     0xf8, 0xa6, 0x44, 0x1a, 0x99, 0xc7, 0x25, 0x7b,
+     0x3a, 0x64, 0x86, 0xd8, 0x5b, 0x05, 0xe7, 0xb9,
+     0x8c, 0xd2, 0x30, 0x6e, 0xed, 0xb3, 0x51, 0x0f,
+     0x4e, 0x10, 0xf2, 0xac, 0x2f, 0x71, 0x93, 0xcd,
+     0x11, 0x4f, 0xad, 0xf3, 0x70, 0x2e, 0xcc, 0x92,
+     0xd3, 0x8d, 0x6f, 0x31, 0xb2, 0xec, 0x0e, 0x50,
+     0xaf, 0xf1, 0x13, 0x4d, 0xce, 0x90, 0x72, 0x2c,
+     0x6d, 0x33, 0xd1, 0x8f, 0x0c, 0x52, 0xb0, 0xee,
+     0x32, 0x6c, 0x8e, 0xd0, 0x53, 0x0d, 0xef, 0xb1,
+     0xf0, 0xae, 0x4c, 0x12, 0x91, 0xcf, 0x2d, 0x73,
+     0xca, 0x94, 0x76, 0x28, 0xab, 0xf5, 0x17, 0x49,
+     0x08, 0x56, 0xb4, 0xea, 0x69, 0x37, 0xd5, 0x8b,
+     0x57, 0x09, 0xeb, 0xb5, 0x36, 0x68, 0x8a, 0xd4,
+     0x95, 0xcb, 0x29, 0x77, 0xf4, 0xaa, 0x48, 0x16,
+     0xe9, 0xb7, 0x55, 0x0b, 0x88, 0xd6, 0x34, 0x6a,
+     0x2b, 0x75, 0x97, 0xc9, 0x4a, 0x14, 0xf6, 0xa8,
+     0x74, 0x2a, 0xc8, 0x96, 0x15, 0x4b, 0xa9, 0xf7,
+     0xb6, 0xe8, 0x0a, 0x54, 0xd7, 0x89, 0x6b, 0x35,
+ };
+  
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,7 +116,9 @@ static void MX_I2S2_Init(void);
 static void MX_I2S3_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM_Init(USER_LED_CONFIG user_led_config);
-
+static void processReceivedData(uint8_t *Buf);
+static uint8_t * stringChangeCase(uint8_t * string);
+static uint8_t getCRC(uint8_t * string);
 
 /* USER CODE BEGIN PFP */
 
@@ -126,9 +169,20 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  MX_TIM_Init(USER_LED_CONFIG_DEFAULT); /* Timer Init - Default: 0.25 s period */
+  MX_TIM_Init(USER_LED_CONFIG_FOUR_SECONDS_PERIOD); /* Timer Init - Default: 0.25 s period */  
   
-  HAL_TIM_OC_Start(&tim4Handle, TIM_CHANNEL_1);
+  /* Enable Interrupt for CC Channel 1 */
+  //TIM4->DIER |= TIM_DIER_UIE;
+  //TIM4->DIER |= TIM_DIER_CC1IE_Msk;
+ 
+  /* Start Timer */
+  HAL_TIM_OC_Start_IT(&tim4Handle, TIM_CHANNEL_1);
+  
+  /* Set Timer 4 Priority to highest */
+  HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
+  
+  /* Enable TIM4 Interrupt */
+  HAL_NVIC_EnableIRQ(TIM4_IRQn);
   
   /* USER CODE END 2 */
 
@@ -139,7 +193,17 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      
+    
+    /* Process any received data if new data received */
+    if (RECEIVED_DATA_STATUS_RECEIVED == received_data.status)
+    {
+        /* Process data */
+        processReceivedData((received_data.data));
+                                
+        /* Reset Status */
+        received_data.status = RECEIVED_DATA_STATUS_NOT_RECEIVED;        
+    }
+    
     /* Read User Button */
     user_button_state.current = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
     
@@ -470,6 +534,79 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+static uint8_t * stringChangeCase(uint8_t * string)
+{
+    uint16_t index;
+    uint8_t ch;
+    static uint8_t output[50];
+    
+    index = 0;
+    while (string[index] != '\0')
+    {
+        /* Change one character at a time */
+        ch = string[index];
+        if (ch >= 'A' && ch <= 'Z')
+        {
+            /* Upper case to lower case */
+            output[index] = ch + (uint8_t)32;           
+        }
+        else if (ch >= 'a' && ch <= 'z')
+        {
+            /* Lower case to upper case */
+            output[index] = ch - (uint8_t)32;
+        }
+        else
+        {
+            /* Keep the rest of the characters as is */
+            output[index] = ch;
+        }
+        
+        index++;        
+    }
+    output[index] = '\0';
+    return output;
+}
+
+static uint8_t getCRC(uint8_t * string)
+{
+    uint16_t index = 0;
+    uint8_t crc = 0x00U; 
+
+    if (string != NULL)
+    {
+        crc &= 0xFFU;
+        while (string[index] != '\0' && string[index] != '\n' && string[index] != '\r')
+        {
+            crc = crc_max_look_up_table[(uint8_t)(string[index] ^ crc)];
+            index++;
+        }
+    }
+    
+    return crc; 
+}
+
+static void processReceivedData(uint8_t *Buf)
+{    
+    /* Clean Changed Case string */
+    memset((char *)changed_case_data, '\0', sizeof(changed_case_data));
+  
+    /* Update changed case string */
+    strcpy((char *)changed_case_data,(const char *)stringChangeCase(Buf));
+
+    /* Calculate CRC (Max*/
+    src8 = getCRC(changed_case_data);
+
+    /* Append Checksum to String to be sent over */
+    strncat((char *)changed_case_data, (const char *)&src8, (size_t)1);
+
+    /* Send the new string */
+    CDC_Transmit_FS(changed_case_data, (uint16_t)strlen((char *)changed_case_data));
+    
+    /* Wait for transmission*/
+    HAL_Delay(200);
+}
+
 static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
 {
     TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -480,23 +617,24 @@ static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
     __HAL_RCC_TIM4_CLK_ENABLE();
     
     /* Timer 4 Basic Timer Initialization 
-     * Input Frequency = 96 MHz. Prescaler = 48000 - 1. TIM Input Freq = 96MHz/48K = 2000. Input Period = 0.5ms
+     * CK_INT = APB1 = SYSCLK / 4 = 96 MHz/4 = 24 MHz
+     * Prescaler = 24000 - 1. TIM Input Freq = 24MHz/24K = 1000. Input Period = 1ms
      */
     tim4Handle.Instance = TIM4;
     tim4Handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     tim4Handle.Init.CounterMode = TIM_COUNTERMODE_UP;
-    tim4Handle.Init.Prescaler = 48000 - 1;    
+    tim4Handle.Init.Prescaler = 24000 - 1;    
     if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
     {
         /* 4 seconds period */
-        /* ARR + 1 = (Desired Period) / (TIM Input Period) = 4000ms/0.5ms = 4000 */
-        tim4Handle.Init.Period = 8000 - 1;        
+        /* ARR + 1 = (Desired Period) / (TIM Input Period) = 4000ms/1ms = 4000 */
+        tim4Handle.Init.Period = 4000 - 1;        
     }
     else
     {
         /* Default */
-        /* ARR + 1 = (Desired Period)/(TIM Input Period) = 250ms/0.5ms = 500 */
-        tim4Handle.Init.Period = 500 - 1;
+        /* ARR + 1 = (Desired Period)/(TIM Input Period) = 250ms/1ms = 250 */
+        tim4Handle.Init.Period = 250 - 1;
     }    
     if (HAL_TIM_Base_Init(&tim4Handle) != HAL_OK)
     {
@@ -531,13 +669,13 @@ static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
     
     if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
     {
-        /* 4 sec period Config: 8000/4 = 2000 to achieve 25% Duty Cycle */
-        sConfigOC.Pulse = 2000;
+        /* 4 sec period Config: 4000/4 = 1000 to achieve 25% Duty Cycle */
+        sConfigOC.Pulse = 4000 - 1000;
     }
     else
     {
-        /* Default Config: 500/4 to achieve 25% Duty Cycle */
-        sConfigOC.Pulse = 125;
+        /* Default Config: 250/4 to achieve 25% Duty Cycle */
+        sConfigOC.Pulse = 250 - 62;
     }
     
 

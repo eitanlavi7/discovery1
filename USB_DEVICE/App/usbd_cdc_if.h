@@ -52,7 +52,7 @@
 #define APP_RX_DATA_SIZE  2048
 #define APP_TX_DATA_SIZE  2048
 /* USER CODE BEGIN EXPORTED_DEFINES */
-
+  
 /* USER CODE END EXPORTED_DEFINES */
 
 /**
@@ -65,7 +65,18 @@
   */
 
 /* USER CODE BEGIN EXPORTED_TYPES */
-
+ typedef enum
+ {
+     RECEIVED_DATA_STATUS_NOT_RECEIVED = 0,
+     RECEIVED_DATA_STATUS_RECEIVED
+ }RECEIVED_DATA_STATUS;
+ 
+ typedef struct T_RxData_StructType
+ {
+     RECEIVED_DATA_STATUS status;
+     uint8_t data[50];
+ } T_RxData_Struct;
+ 
 /* USER CODE END EXPORTED_TYPES */
 
 /**
@@ -94,7 +105,7 @@
 extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
 
 /* USER CODE BEGIN EXPORTED_VARIABLES */
-
+extern T_RxData_Struct received_data;
 /* USER CODE END EXPORTED_VARIABLES */
 
 /**
