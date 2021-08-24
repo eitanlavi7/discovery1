@@ -115,7 +115,7 @@ static void MX_I2C1_Init(void);
 static void MX_I2S2_Init(void);
 static void MX_I2S3_Init(void);
 static void MX_SPI1_Init(void);
-static void MX_TIM_Init(USER_LED_CONFIG user_led_config);
+static void MX_TIM_Init(void);
 static void processReceivedData(uint8_t *Buf);
 static uint8_t * stringChangeCase(uint8_t * string);
 static uint8_t getCRC(uint8_t * string);
@@ -169,13 +169,10 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  MX_TIM_Init(USER_LED_CONFIG_FOUR_SECONDS_PERIOD); /* Timer Init - Default: 0.25 s period */  
+  /* Timer Init with Default: 0.25 s period */  
+  MX_TIM_Init(); 
   
-  /* Enable Interrupt for CC Channel 1 */
-  //TIM4->DIER |= TIM_DIER_UIE;
-  //TIM4->DIER |= TIM_DIER_CC1IE_Msk;
- 
-  /* Start Timer */
+  /* Start Timer with CC Interrupt */
   HAL_TIM_OC_Start_IT(&tim4Handle, TIM_CHANNEL_1);
   
   /* Set Timer 4 Priority to highest */
@@ -207,6 +204,7 @@ int main(void)
     /* Read User Button */
     user_button_state.current = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
     
+     /* 5s delay to debounce button state */
     HAL_Delay(5);
     
     /* If Button was pressed and then released, change LED Period */
@@ -215,24 +213,16 @@ int main(void)
         /* Toggle 4 seconds period flag */
         period_4_seconds = !period_4_seconds;
         
-        /* Stop Timer */
-        HAL_TIM_OC_Stop(&tim4Handle, TIM_CHANNEL_1);
-        
         if (period_4_seconds)
         {
-            /* Update Timer Config to 4 seconds period */
-            MX_TIM_Init(USER_LED_CONFIG_FOUR_SECONDS_PERIOD);
+            /* Update Prescaler to achieve 4 seconds period */
+            __HAL_TIM_SET_PRESCALER(&tim4Handle, 48000-1);
         }
         else
         {
-            /* Change to Default value of 0.25 seconds period */
-            MX_TIM_Init(USER_LED_CONFIG_DEFAULT);
+            /* Update Prescaler to Change to Default value of 0.25 seconds period */
+            __HAL_TIM_SET_PRESCALER(&tim4Handle, 3000-1);
         }
-        
-        HAL_Delay(1);
-        
-        /* Restart Timer with new Frequency */
-        HAL_TIM_OC_Start(&tim4Handle, TIM_CHANNEL_1);
     }
     
     /* Update button previous state if different from current */
@@ -535,6 +525,10 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+/**
+  * @brief Changes case for the input string
+  * @retval Pointer to char (string with changed case).
+  */
 static uint8_t * stringChangeCase(uint8_t * string)
 {
     uint16_t index;
@@ -568,6 +562,10 @@ static uint8_t * stringChangeCase(uint8_t * string)
     return output;
 }
 
+/**
+  * @brief Gets CRC8-MAX of a string. Mode of computation is by using crc8-max loop up table
+  * @retval uint8 crc_value
+  */
 static uint8_t getCRC(uint8_t * string)
 {
     uint16_t index = 0;
@@ -578,6 +576,7 @@ static uint8_t getCRC(uint8_t * string)
         crc &= 0xFFU;
         while (string[index] != '\0' && string[index] != '\n' && string[index] != '\r')
         {
+            /* Look for crc vaue in look up table */
             crc = crc_max_look_up_table[(uint8_t)(string[index] ^ crc)];
             index++;
         }
@@ -586,6 +585,10 @@ static uint8_t getCRC(uint8_t * string)
     return crc; 
 }
 
+/**
+  * @brief Processes received data: 1.Case is changed, 2. CRC8 is calculated and appended. 3. New Message is transmitted.
+  * @retval None
+  */
 static void processReceivedData(uint8_t *Buf)
 {    
     /* Clean Changed Case string */
@@ -607,7 +610,11 @@ static void processReceivedData(uint8_t *Buf)
     HAL_Delay(200);
 }
 
-static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
+/**
+  * @brief Timer Configuration
+  * @retval None
+  */
+static void MX_TIM_Init(void)
 {
     TIM_ClockConfigTypeDef sClockSourceConfig = {0};
     TIM_MasterConfigTypeDef sMasterConfig = {0};
@@ -617,25 +624,18 @@ static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
     __HAL_RCC_TIM4_CLK_ENABLE();
     
     /* Timer 4 Basic Timer Initialization 
-     * CK_INT = APB1 = SYSCLK / 4 = 96 MHz/4 = 24 MHz
-     * Prescaler = 24000 - 1. TIM Input Freq = 24MHz/24K = 1000. Input Period = 1ms
+     * CK_INT = APB1Timer Clock = (SYSCLK/4)*2 = 96 MHz/2 = 48 MHz
+     * Prescaler = 3000 - 1. TIM Input Freq = 48MHz/3K = 16000. Input Period = 6.25us
      */
     tim4Handle.Instance = TIM4;
     tim4Handle.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     tim4Handle.Init.CounterMode = TIM_COUNTERMODE_UP;
-    tim4Handle.Init.Prescaler = 24000 - 1;    
-    if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
-    {
-        /* 4 seconds period */
-        /* ARR + 1 = (Desired Period) / (TIM Input Period) = 4000ms/1ms = 4000 */
-        tim4Handle.Init.Period = 4000 - 1;        
-    }
-    else
-    {
-        /* Default */
-        /* ARR + 1 = (Desired Period)/(TIM Input Period) = 250ms/1ms = 250 */
-        tim4Handle.Init.Period = 250 - 1;
-    }    
+    tim4Handle.Init.Prescaler = 3000 - 1;    
+
+    /* Desider Period = 0.25s */
+    /* ARR + 1 = (Desired Period)/(TIM Input Period) = 250ms/0.0625ms = 4000 */
+    tim4Handle.Init.Period = 4000 - 1;
+
     if (HAL_TIM_Base_Init(&tim4Handle) != HAL_OK)
     {
         Error_Handler();
@@ -666,19 +666,10 @@ static void MX_TIM_Init(USER_LED_CONFIG user_led_config)
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
     sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-    
-    if (USER_LED_CONFIG_FOUR_SECONDS_PERIOD == user_led_config)
-    {
-        /* 4 sec period Config: 4000/4 = 1000 to achieve 25% Duty Cycle */
-        sConfigOC.Pulse = 4000 - 1000;
-    }
-    else
-    {
-        /* Default Config: 250/4 to achieve 25% Duty Cycle */
-        sConfigOC.Pulse = 250 - 62;
-    }
-    
 
+    /* For 25% Duty Cycle Start pulse at 3/4 of period */
+    sConfigOC.Pulse = (uint32_t)(((tim4Handle.Init.Period) * 3) / 4);
+    
     if (HAL_TIM_OC_ConfigChannel(&tim4Handle, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
     {
         Error_Handler();

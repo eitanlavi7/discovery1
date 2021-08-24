@@ -224,11 +224,15 @@ void TIM4_IRQHandler(void)
     
     if (toggle_flag)
     {
-        TIM4->CCR1 = 3999; /* Toggle back again at end of period to restart Output. */
+        /* Toggle back again at end of period to restart Output. */
+        __HAL_TIM_SET_COMPARE(&tim4Handle, TIM_CHANNEL_1, tim4Handle.Init.Period);
+        //TIM4->CCR1 = 3999; 
     }    
     else
     {
-        TIM4->CCR1 = 3000; /* Toggle back again at end of period to restart Output. */
+        /* Toggle at 3/4 of the period to achieve 25% Duty Cycle. */
+        __HAL_TIM_SET_COMPARE(&tim4Handle, TIM_CHANNEL_1, (uint32_t)((tim4Handle.Init.Period * 3) / 4) );
+        //TIM4->CCR1 = 3000; 
     }
     toggle_flag = !toggle_flag;
 }
